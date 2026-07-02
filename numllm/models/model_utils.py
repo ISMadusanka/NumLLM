@@ -77,18 +77,28 @@ def init_new_token_embeddings(model, tokenizer, cfg):
 
 
 def attach_lora(model, cfg, modules_to_save):
+    import dataclasses
     from peft import LoraConfig, get_peft_model
 
-    lora = LoraConfig(
+    ms = list(modules_to_save) or None
+    kwargs = dict(
         r=cfg.lora.r,
         lora_alpha=cfg.lora.alpha,
         lora_dropout=cfg.lora.dropout,
         target_modules=list(cfg.lora.target_modules),
-        modules_to_save=list(modules_to_save) or None,
+        modules_to_save=ms,
         bias="none",
         task_type="CAUSAL_LM",
     )
-    peft_model = get_peft_model(model, lora)
+    # Qwen (and Llama-3.2-3B) tie embed_tokens<->lm_head. If we train them in
+    # full, keep the tie enforced so the merged model doesn't drop the trained
+    # lm_head on reload (PEFT #2777). Guarded for PEFT versions without the flag.
+    tied = getattr(getattr(model, "config", None), "tie_word_embeddings", False)
+    if tied and ms and ("embed_tokens" in ms or "lm_head" in ms):
+        if any(f.name == "ensure_weight_tying" for f in dataclasses.fields(LoraConfig)):
+            kwargs["ensure_weight_tying"] = True
+
+    peft_model = get_peft_model(model, LoraConfig(**kwargs))
     peft_model.enable_input_require_grads()   # needed for gradient checkpointing
     peft_model.print_trainable_parameters()
     return peft_model
