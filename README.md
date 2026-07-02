@@ -1,6 +1,6 @@
 # NumLLM
 
-Continual pre-training + fine-tuning of **Llama-3.2-3B** (configurable) with a
+Continual pre-training + fine-tuning of **Qwen2.5-3B** (configurable) with a
 custom **numeric encoding** scheme. Numbers in the training text are rewritten
 into structured special tokens (see [`encode_decode.py`](encode_decode.py)) so
 the model learns digit/magnitude structure explicitly.
@@ -43,10 +43,11 @@ pip install --index-url https://download.pytorch.org/whl/cu128 torch
 pip install -r requirements.txt
 ```
 
-Llama is gated on Hugging Face — log in and accept the license once:
+Qwen2.5-3B is openly downloadable (not gated). A `huggingface-cli login` is only
+needed if you hit anonymous rate limits or use a private cache:
 
 ```bash
-huggingface-cli login
+huggingface-cli login   # optional
 ```
 
 All outputs go under `artifacts/` (override with `paths.root`). Config lives in

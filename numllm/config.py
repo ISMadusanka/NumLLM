@@ -19,7 +19,7 @@ import yaml
 
 @dataclass
 class ModelCfg:
-    base_model: str = "meta-llama/Llama-3.2-3B"
+    base_model: str = "Qwen/Qwen2.5-3B"
     dtype: str = "bfloat16"                 # bfloat16 | float16 | float32
     attn_implementation: str = "sdpa"       # sdpa | flash_attention_2 | eager
     load_in_4bit: bool = False              # QLoRA-style base loading

@@ -5,7 +5,7 @@
 # ======================================================================
 
 model:
-  base_model: meta-llama/Llama-3.2-3B      # any HF causal LM works
+  base_model: Qwen/Qwen2.5-3B              # any HF causal LM works
   dtype: bfloat16                          # bfloat16 | float16 | float32
   attn_implementation: sdpa                # sdpa | flash_attention_2 | eager
   load_in_4bit: false                      # true => QLoRA-style base loading
