@@ -20,7 +20,7 @@ import os
 from numllm.config import Config
 from numllm.encoding_utils import NumberCodec
 from numllm.models.model_utils import load_for_inference
-from numllm.utils import human, load_json, save_json, setup_logging
+from numllm.utils import hard_exit, human, load_json, save_json, setup_logging
 
 
 def _default_skip(cfg) -> int:
@@ -113,6 +113,7 @@ def main(argv=None):
     skip = args.skip_docs if args.skip_docs is not None else _default_skip(cfg)
     block = args.block_size or cfg.cpt.block_size
     run(cfg, args.model, args.num_docs, skip, block, args.encoded, logger)
+    hard_exit(0)     # avoid streaming thread crash during shutdown
 
 
 if __name__ == "__main__":

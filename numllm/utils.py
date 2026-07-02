@@ -154,6 +154,20 @@ def human(n: float) -> str:
     return f"{n:.2f}P"
 
 
+def hard_exit(code: int = 0) -> None:
+    """Exit immediately, skipping Python's interpreter finalization.
+
+    Streaming HTTP (datasets/fsspec/aiohttp) and native tokenizer background
+    threads can abort during shutdown ("Fatal Python error: PyGILState_Release
+    ... must be current"). When all output is already flushed to disk, this
+    sidesteps that noisy-but-harmless teardown and guarantees a clean exit code.
+    """
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
+
+
 class StateStore:
     """Crash-safe key/value JSON state for resumable jobs."""
 

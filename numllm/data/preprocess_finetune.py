@@ -16,8 +16,8 @@ import os
 from numllm.config import Config
 from numllm.encoding_utils import NumberCodec
 from numllm.tokenizer_utils import get_extended_tokenizer
-from numllm.utils import (JsonlShardWriter, StateStore, human, save_json,
-                          set_seed, setup_logging)
+from numllm.utils import (JsonlShardWriter, StateStore, hard_exit, human,
+                          save_json, set_seed, setup_logging)
 
 _TOK_BATCH = 500
 
@@ -176,6 +176,7 @@ def main(argv=None):
     cfg = Config.load(args.config, args.set)
     logger = setup_logging("preprocess_finetune", cfg.paths.logs)
     run(cfg, logger)
+    hard_exit(0)     # avoid streaming/tokenizer thread crash during shutdown
 
 
 if __name__ == "__main__":

@@ -36,9 +36,14 @@ def load_base_model(cfg, model_path=None, tokenizer=None, for_training=False):
     )
 
     if tokenizer is not None:
-        emb = model.get_input_embeddings().weight.shape[0]
-        if len(tokenizer) != emb:
-            model.resize_token_embeddings(len(tokenizer))   # new numeric-token rows
+        orig_vocab = model.get_input_embeddings().weight.shape[0]
+        if len(tokenizer) != orig_vocab:
+            model.resize_token_embeddings(len(tokenizer))
+            # Qwen pads its embedding table beyond the tokenizer, so a resize can
+            # SHRINK it and place our new tokens on old (random) padding rows —
+            # HF's mean-init only runs when growing. Initialize them explicitly.
+            if cfg.encoding.enabled:
+                init_new_token_embeddings(model, tokenizer, cfg)
 
     if for_training:
         if cfg.model.load_in_4bit:
@@ -47,6 +52,28 @@ def load_base_model(cfg, model_path=None, tokenizer=None, for_training=False):
                 model, use_gradient_checkpointing=True)
         model.config.use_cache = False
     return model
+
+
+def init_new_token_embeddings(model, tokenizer, cfg):
+    """Set the numeric special-token embedding rows to the mean of the other
+    (pretrained) rows, so new tokens start neutral. They are then trained in
+    full via lora.cpt_modules_to_save. Handles tied and untied lm_head, and is
+    correct whether the resize grew or shrank the table."""
+    import torch
+    from numllm.tokenizer_utils import build_special_tokens
+
+    ids = [i for i in tokenizer.convert_tokens_to_ids(build_special_tokens(cfg))
+           if isinstance(i, int) and i >= 0]
+    if not ids:
+        return
+    inp = model.get_input_embeddings().weight
+    keep = torch.ones(inp.shape[0], dtype=torch.bool)
+    keep[ids] = False
+    with torch.no_grad():
+        inp.data[ids] = inp.data[keep].float().mean(dim=0).to(inp.dtype)
+        out = model.get_output_embeddings()
+        if out is not None and out.weight.data_ptr() != inp.data_ptr():   # untied
+            out.weight.data[ids] = out.weight.data[keep].float().mean(dim=0).to(out.weight.dtype)
 
 
 def attach_lora(model, cfg, modules_to_save):
