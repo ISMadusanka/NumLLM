@@ -1,0 +1,14 @@
+# Pipeline outputs (data shards, checkpoints, merged models, eval, logs)
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# HF caches (if pointed here)
+.cache/
+wandb/

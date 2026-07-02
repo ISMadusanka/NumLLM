@@ -1,0 +1,19 @@
+# Core — install a Blackwell-capable PyTorch first (RTX 5090 needs CUDA 12.4+/12.8):
+#   pip install --index-url https://download.pytorch.org/whl/cu128 torch
+torch>=2.6.0
+
+transformers>=4.45.0
+datasets>=2.20.0
+accelerate>=0.34.0
+peft>=0.13.0
+sentencepiece>=0.2.0
+safetensors>=0.4.0
+pyyaml>=6.0
+numpy>=1.26
+tqdm>=4.66
+
+# Optional: 4-bit / QLoRA base loading (set model.load_in_4bit: true)
+bitsandbytes>=0.44.0 ; platform_system != "Windows"
+
+# Optional: faster attention (set model.attn_implementation: flash_attention_2)
+# flash-attn>=2.6.0

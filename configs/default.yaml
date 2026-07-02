@@ -1,0 +1,101 @@
+# ======================================================================
+# NumLLM master config. Every step reads this file.
+# Override any value on the CLI, e.g.:
+#   python -m numllm.data.preprocess_pretrain --set pretrain_data.target_tokens=100000000
+# ======================================================================
+
+model:
+  base_model: meta-llama/Llama-3.2-3B      # any HF causal LM works
+  dtype: bfloat16                          # bfloat16 | float16 | float32
+  attn_implementation: sdpa                # sdpa | flash_attention_2 | eager
+  load_in_4bit: false                      # true => QLoRA-style base loading
+  trust_remote_code: false
+
+encoding:
+  type: flat                               # flat | tree | bracket | hierarchy
+  enabled: true                            # false => train on plain numbers
+  max_group_index: 40                      # special-token coverage (int groups)
+  max_frac_groups: 20
+  max_int_digits: 30                       # don't encode longer digit runs (ids/hashes)
+  max_frac_digits: 15
+
+paths:
+  root: artifacts                          # everything is written under here
+
+pretrain_data:
+  dataset: HuggingFaceFW/fineweb
+  name: sample-10BT                        # ~10BT slice; we stream ~5B from it
+  split: train
+  text_field: text
+  target_tokens: 5000000000                # 5B — stop preprocessing here
+  docs_per_shard: 50000
+  preview_samples: 50
+  min_numbers_per_doc: 1                   # skip docs with no numbers
+  state_every_docs: 20000
+  seed: 1234
+
+finetune_data:
+  dataset: AI-MO/NuminaMath-CoT
+  split: train
+  problem_field: problem
+  solution_field: solution
+  target_tokens: 10000000                  # 10M
+  docs_per_shard: 20000
+  preview_samples: 50
+  encode_solution: true
+  seed: 1234
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  cpt_modules_to_save: [embed_tokens, lm_head]   # train new-token rows in full
+  sft_modules_to_save: []
+
+cpt:
+  block_size: 1024
+  per_device_batch_size: 8
+  grad_accum: 8
+  lr: 1.0e-4
+  warmup_ratio: 0.02
+  max_steps: -1                            # -1 => derived from target_tokens
+  lr_scheduler_type: cosine
+  logging_steps: 10
+  save_steps: 500
+  save_total_limit: 3
+  gradient_checkpointing: true
+  merge_after: true
+  seed: 1234
+
+sft:
+  max_seq_len: 2048
+  per_device_batch_size: 4
+  grad_accum: 8
+  lr: 2.0e-4
+  warmup_ratio: 0.03
+  num_train_epochs: 3.0
+  lr_scheduler_type: cosine
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 3
+  gradient_checkpointing: true
+  start_from: cpt                          # cpt | base
+  merge_after: true
+  seed: 1234
+
+eval:
+  benchmarks: [gsm8k, svamp, math, mmlu_pro_math, drop, tatqa, finqa, mmlu]
+  limit: 0                                 # 0 => full split; else first N
+  n_shots: 4
+  max_new_tokens: 512
+  batch_size: 8
+  temperature: 0.0
+  top_p: 1.0
+  seed: 1234
+
+infer:
+  max_new_tokens: 512
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
