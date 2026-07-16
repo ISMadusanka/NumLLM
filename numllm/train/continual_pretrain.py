@@ -25,7 +25,10 @@ def _derive_max_steps(cfg, logger) -> int:
     manifest = os.path.join(cfg.paths.pretrain_data, "manifest.json")
     total = cfg.pretrain_data.target_tokens
     if os.path.exists(manifest):
-        total = load_json(manifest).get("tokens_written", total)
+        written = load_json(manifest).get("tokens_written", total)
+        # Cap at target_tokens so lowering it (e.g. 5B -> 1B) shortens training
+        # even when more tokens were already preprocessed (no re-preprocess needed).
+        total = min(written, cfg.pretrain_data.target_tokens)
     world = int(os.environ.get("WORLD_SIZE", 1))
     tokens_per_step = (cfg.cpt.per_device_batch_size * cfg.cpt.grad_accum
                        * world * cfg.cpt.block_size)

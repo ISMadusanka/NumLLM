@@ -15,11 +15,26 @@ from typing import List, Optional
 import yaml
 
 
+# The base models available out of the box. Add your own here (or in YAML under
+# `models:`) and switch the whole pipeline to one with `--set model.name=<id>`.
+# Each id namespaces its own artifacts, so models never clobber each other.
+DEFAULT_MODEL_REGISTRY = {
+    "qwen3b":   {"base_model": "Qwen/Qwen2.5-3B"},
+    "qwen1.5b": {"base_model": "Qwen/Qwen2.5-1.5B"},
+}
+
+
 # ---------------------------------------------------------------- sections
 
 @dataclass
 class ModelCfg:
-    base_model: str = "Qwen/Qwen2.5-3B"
+    # `name` selects an entry in the top-level `models` registry and namespaces
+    # every per-model output (tokenizer / CPT / SFT / eval). `base_model` is
+    # normally derived from that entry; set it explicitly only to pin a custom
+    # checkpoint — an explicit value overrides the registry, but the output
+    # namespace still follows `name`.
+    name: str = "qwen3b"
+    base_model: str = "Qwen/Qwen2.5-3B"     # derived from models[name] unless pinned
     dtype: str = "bfloat16"                 # bfloat16 | float16 | float32
     attn_implementation: str = "sdpa"       # sdpa | flash_attention_2 | eager
     load_in_4bit: bool = False              # QLoRA-style base loading
@@ -47,25 +62,31 @@ class PathsCfg:
     eval_out: Optional[str] = None
     logs: Optional[str] = None
 
-    def resolve(self) -> "PathsCfg":
+    def resolve(self, model_id: str = "default") -> "PathsCfg":
         r = self.root
+        mid = model_id or "default"
+        m = os.path.join(r, "models", mid)
+        # Preprocessed data is encoded *text* (independent of the model's
+        # tokenizer), so it is shared across models: preprocess once, reuse for all.
         self.pretrain_data = self.pretrain_data or os.path.join(r, "data", "pretrain")
         self.finetune_data = self.finetune_data or os.path.join(r, "data", "finetune")
-        self.tokenizer = self.tokenizer or os.path.join(r, "tokenizer")
-        self.cpt_out = self.cpt_out or os.path.join(r, "models", "cpt")
-        self.sft_out = self.sft_out or os.path.join(r, "models", "sft")
-        self.eval_out = self.eval_out or os.path.join(r, "eval")
-        self.logs = self.logs or os.path.join(r, "logs")
+        # Everything model-specific is namespaced by the model id so that two
+        # models' weights / tokenizers / eval results never overwrite each other.
+        self.tokenizer = self.tokenizer or os.path.join(m, "tokenizer")
+        self.cpt_out = self.cpt_out or os.path.join(m, "cpt")
+        self.sft_out = self.sft_out or os.path.join(m, "sft")
+        self.eval_out = self.eval_out or os.path.join(r, "eval", mid)
+        self.logs = self.logs or os.path.join(r, "logs", mid)
         return self
 
 
 @dataclass
 class PretrainDataCfg:
     dataset: str = "HuggingFaceFW/fineweb"
-    name: Optional[str] = "sample-10BT"     # a ~10BT slice; we take ~5B from it
+    name: Optional[str] = "sample-10BT"     # a ~10BT slice; we take ~1B from it
     split: str = "train"
     text_field: str = "text"
-    target_tokens: int = 5_000_000_000      # stop preprocessing here
+    target_tokens: int = 1_000_000_000      # 1B — stop preprocessing here
     docs_per_shard: int = 50_000            # JSONL shard size (accepted docs)
     preview_samples: int = 50               # raw->encoded pairs saved for inspection
     min_numbers_per_doc: int = 1            # skip docs with fewer numbers than this
@@ -181,6 +202,9 @@ class InferCfg:
 @dataclass
 class Config:
     model: ModelCfg = field(default_factory=ModelCfg)
+    # id -> {base_model: ...} registry of models the pipeline can train/eval.
+    models: dict = field(default_factory=lambda: {
+        k: dict(v) for k, v in DEFAULT_MODEL_REGISTRY.items()})
     encoding: EncodingCfg = field(default_factory=EncodingCfg)
     paths: PathsCfg = field(default_factory=PathsCfg)
     pretrain_data: PretrainDataCfg = field(default_factory=PretrainDataCfg)
@@ -200,16 +224,34 @@ class Config:
         if path:
             with open(path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+
+        # Merge the model registry (top-level `models:`) over the built-in defaults.
+        if isinstance(data.get("models"), dict):
+            for mid, entry in data["models"].items():
+                if isinstance(entry, dict):
+                    cfg.models[mid] = {**cfg.models.get(mid, {}), **entry}
+                else:
+                    warnings.warn(f"Ignoring non-dict models entry {mid!r}")
+
         for sec in fields(cls):
             section_obj = getattr(cfg, sec.name)
             if is_dataclass(section_obj) and isinstance(data.get(sec.name), dict):
                 _apply_dict(section_obj, data[sec.name], sec.name)
         for other in set(data) - {f.name for f in fields(cls)}:
             warnings.warn(f"Unknown config section ignored: {other!r}")
+
+        # An explicitly provided base_model (in YAML or via --set) pins the model
+        # and overrides the registry; otherwise it is derived from model.name.
+        base_model_pinned = bool(isinstance(data.get("model"), dict)
+                                 and "base_model" in data["model"])
         if overrides:
             for ov in overrides:
                 cfg.apply_override(ov)
-        cfg.paths.resolve()
+                if ov.split("=", 1)[0].strip() == "model.base_model":
+                    base_model_pinned = True
+
+        cfg._resolve_active_model(base_model_pinned)
+        cfg.paths.resolve(cfg.model.name)
         return cfg
 
     def apply_override(self, dotted: str) -> None:
@@ -228,6 +270,32 @@ class Config:
         if name not in valid:
             raise ValueError(f"Unknown key {name!r} in section {section!r}")
         setattr(section_obj, name, yaml.safe_load(raw))
+
+    def _resolve_active_model(self, base_model_pinned: bool = False) -> None:
+        """Point `model.base_model` at the active registry entry.
+
+        `model.name` selects a `models` entry and namespaces every per-model
+        output. Unless `base_model` was pinned explicitly, it is taken from that
+        entry. An unknown name is allowed (outputs are still namespaced under it)
+        but warns when there is nothing to resolve the base model from.
+        """
+        entry = self.models.get(self.model.name)
+        if entry is None:
+            if not base_model_pinned:
+                warnings.warn(
+                    f"model.name={self.model.name!r} is not in the models registry "
+                    f"{sorted(self.models)} and no base_model was set; "
+                    f"falling back to base_model={self.model.base_model!r}.")
+            return
+        registry_base = entry.get("base_model")
+        if base_model_pinned:
+            if registry_base and registry_base != self.model.base_model:
+                warnings.warn(
+                    f"base_model={self.model.base_model!r} is pinned but "
+                    f"model.name={self.model.name!r} maps to {registry_base!r}; "
+                    f"outputs stay namespaced under {self.model.name!r}.")
+        elif registry_base:
+            self.model.base_model = registry_base
 
     def to_dict(self) -> dict:
         return {f.name: _section_to_dict(getattr(self, f.name)) for f in fields(self)}

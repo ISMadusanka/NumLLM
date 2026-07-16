@@ -5,11 +5,24 @@
 # ======================================================================
 
 model:
-  base_model: Qwen/Qwen2.5-3B              # any HF causal LM works
+  name: qwen3b                             # active model (an id in `models` below);
+                                           # namespaces its tokenizer/CPT/SFT/eval outputs
+  # base_model is taken from the `models` entry for `name`. Uncomment to pin a
+  # custom checkpoint instead (overrides the registry; namespace still follows `name`).
+  # base_model: Qwen/Qwen2.5-3B
   dtype: bfloat16                          # bfloat16 | float16 | float32
   attn_implementation: sdpa                # sdpa | flash_attention_2 | eager
   load_in_4bit: false                      # true => QLoRA-style base loading
   trust_remote_code: false
+
+# Base models the pipeline can train/evaluate. Switch the whole pipeline with:
+#   --set model.name=qwen1.5b
+# Each id gets its own artifacts/ subtree (tokenizer, CPT, SFT, eval), so weights
+# never clobber each other and every model can be benchmarked independently.
+# Add your own: give it an id and a base_model (any HF causal LM works).
+models:
+  qwen3b:   { base_model: Qwen/Qwen2.5-3B }
+  qwen1.5b: { base_model: Qwen/Qwen2.5-1.5B }
 
 encoding:
   type: flat                               # flat | tree | bracket | hierarchy
@@ -24,10 +37,10 @@ paths:
 
 pretrain_data:
   dataset: HuggingFaceFW/fineweb
-  name: sample-10BT                        # ~10BT slice; we stream ~5B from it
+  name: sample-10BT                        # ~10BT slice; we stream ~1B from it
   split: train
   text_field: text
-  target_tokens: 5000000000                # 5B — stop preprocessing here
+  target_tokens: 1000000000                # 1B — stop preprocessing here
   docs_per_shard: 50000
   preview_samples: 50
   min_numbers_per_doc: 1                   # skip docs with no numbers

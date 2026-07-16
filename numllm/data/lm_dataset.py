@@ -1,7 +1,7 @@
 """Packed language-modeling dataset for continual pretraining.
 
 Reads the preprocessed JSONL shards, tokenizes on the fly, and yields
-contiguous `block_size` chunks. Streaming keeps memory flat even at 5B
+contiguous `block_size` chunks. Streaming keeps memory flat even at billions of
 tokens. Shards/chunks are shuffled with a small buffer for better mixing,
 and shard files are split across DataLoader workers.
 """
