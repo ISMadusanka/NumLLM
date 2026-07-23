@@ -40,7 +40,7 @@ pretrain_data:
   name: sample-10BT                        # ~10BT slice; we stream ~1B from it
   split: train
   text_field: text
-  target_tokens: 5000000000                # 1B — stop preprocessing here
+  target_tokens: 5000000000                # 5B — stop preprocessing here
   docs_per_shard: 50000
   preview_samples: 50
   min_numbers_per_doc: 1                   # skip docs with no numbers
@@ -52,7 +52,7 @@ finetune_data:
   split: train
   problem_field: problem
   solution_field: solution
-  target_tokens: 10000000                  # 10M
+  target_tokens: 100000000                  # 100M
   docs_per_shard: 20000
   preview_samples: 50
   encode_solution: true
