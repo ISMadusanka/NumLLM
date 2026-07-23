@@ -20,7 +20,7 @@
 
 #SBATCH --job-name=49_Dinuth_numllm        # CHANGE to GroupNo_StudentName_AnyOther
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1                        # one GPU
+#SBATCH --gres=gpu:2                        # both H100 NVL — CPT runs DDP across them
 #SBATCH --cpus-per-task=8                   # preprocessing is CPU/IO heavy
 #SBATCH --mem=32G                           # 3B CPT + dataset streaming
 #SBATCH --time=48:00:00                     # safety cap (partition limit is infinite)
@@ -62,18 +62,32 @@ echo "=================================================================="
 nvidia-smi || true
 python -c "import torch; print('torch', torch.__version__, '| cuda', torch.cuda.is_available())"
 
+# Number of GPUs for the CPT step (DDP). Defaults to what SLURM granted (2).
+NGPU="${NGPU:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
+NGPU="${NGPU:-1}"
+
 # --- Pipeline (in order; set -e stops the job if any step fails) -----------
+# Steps 1-2 are CPU/IO-bound (dataset streaming + text encoding) — a SINGLE
+# process only. Never run these under torchrun; that would duplicate the work.
 echo ""
 echo "########## [1/3] preprocess_pretrain :: $(date) ##########"
-srun python -m numllm.data.preprocess_pretrain --config "$CONFIG"
+python -m numllm.data.preprocess_pretrain --config "$CONFIG"
 
 echo ""
 echo "########## [2/3] preprocess_finetune :: $(date) ##########"
-srun python -m numllm.data.preprocess_finetune --config "$CONFIG"
+python -m numllm.data.preprocess_finetune --config "$CONFIG"
 
+# Step 3 is GPU-bound — launch DDP across all granted GPUs. HuggingFace Trainer
+# picks up the distributed env automatically, and _derive_max_steps reads
+# WORLD_SIZE, so the same target_tokens finishes in ~1/NGPU of the time.
 echo ""
-echo "########## [3/3] continual_pretrain :: $(date) ##########"
-srun python -m numllm.train.continual_pretrain --config "$CONFIG"
+echo "########## [3/3] continual_pretrain (DDP x${NGPU}) :: $(date) ##########"
+if [ "$NGPU" -gt 1 ]; then
+    torchrun --standalone --nproc_per_node="$NGPU" \
+        -m numllm.train.continual_pretrain --config "$CONFIG"
+else
+    python -m numllm.train.continual_pretrain --config "$CONFIG"
+fi
 
 echo ""
 echo "All steps finished: $(date)"
